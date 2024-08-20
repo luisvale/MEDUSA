@@ -8,9 +8,6 @@
     'maintainer': '',
     'license': 'LGPL-3',
     'depends': ['sale_management', 'stock'],
-    'data': [
-        'views/stock_warehouse.xml',
-    ],
     'installable': True,
     'application': True,
     'auto_install': False,
