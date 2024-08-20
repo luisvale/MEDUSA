@@ -7,9 +7,7 @@
     'category': 'Sales',
     'maintainer': '',
     'license': 'LGPL-3',
-    'depends': ['sale_management', 'stock'],
     'installable': True,
     'application': True,
-    'auto_install': False,
-    'images': ['static/description/main_screen.png'],
+    'auto_install': True,
 }
