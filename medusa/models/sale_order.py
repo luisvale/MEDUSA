@@ -146,6 +146,7 @@ class SaleOrder(models.Model):
 
 
 
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -165,17 +166,22 @@ class AccountInvoice(models.Model):
                             picking.sudo().action_confirm()
                             picking.sudo().action_assign()
 
-                            # Iterar sobre las líneas de factura para asignar la cantidad facturada en qty_done
+                            # Iterar sobre las líneas de la factura
                             for invoice_line in invoice.invoice_line_ids:
                                 product = invoice_line.product_id
                                 quantity = invoice_line.quantity
 
-                                # Buscar el movimiento del producto dentro del picking
-                                for move in picking.move_lines:
-                                    if move.product_id == product:
-                                        _logger.info(f"Asignando {quantity} de {product.name} en qty_done para el picking {picking.name}.")
-                                        # Asignar la cantidad facturada al campo quantity_done
-                                        move.quantity_done = quantity
+                                # Buscar en stock.move.line el movimiento relacionado
+                                move_lines = self.env['stock.move.line'].search([
+                                    ('picking_id', '=', picking.id),
+                                    ('product_id', '=', product.id),
+                                    ('move_id', '!=', False)
+                                ])
+
+                                # Asignar la cantidad facturada a qty_done en cada línea
+                                for move_line in move_lines:
+                                    _logger.info(f"Asignando {quantity} de {product.name} en qty_done para el move_line {move_line.id}.")
+                                    move_line.qty_done = quantity
 
                             # Validar el picking si se han actualizado los movimientos
                             if picking.state in ['confirmed', 'assigned']:
