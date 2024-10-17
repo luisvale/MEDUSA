@@ -103,7 +103,7 @@ class SaleOrder(models.Model):
     @api.multi
     def action_confirm(self):
         stock_warnings = []
-        
+
         for order in self:
             for picking in order.picking_ids:
                 for move in picking.move_ids_without_package:
@@ -139,28 +139,22 @@ class SaleOrder(models.Model):
                     'sale_order_id': self.id
                 }
             }
-        
+
         # Si no hay advertencias de stock, proceder con la confirmación del pedido
-        return super(SaleOrder, self).action_confirm()
+        super(SaleOrder, self).action_confirm()
 
-    @api.multi
-        def action_confirm(self):
-            # Confirmar el pedido de venta y actualizar qty_done en los movimientos de inventario
-            super(SaleOrder, self).action_confirm()
+        # Actualizar qty_done en los movimientos de inventario después de confirmar el pedido
+        for order in self:
+            for picking in order.picking_ids:
+                if picking.state in ['confirmed', 'assigned', 'waiting']:
+                    picking.sudo().action_confirm()
+                    picking.sudo().action_assign()
 
-            for order in self:
-                for picking in order.picking_ids:
-                    if picking.state in ['confirmed', 'assigned', 'waiting']:
-                        picking.sudo().action_confirm()
-                        picking.sudo().action_assign()
+                    # Asignar automáticamente qty_done con la cantidad reservada
+                    for move in picking.move_lines:
+                        move.qty_done = move.reserved_availability
 
-                        # Asignar automáticamente qty_done con la cantidad reservada
-                        for move in picking.move_lines:
-                            move.qty_done = move.reserved_availability
-
-            return True
-
-
+        return True
 
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
