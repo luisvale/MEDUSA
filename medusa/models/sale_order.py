@@ -75,27 +75,11 @@
 #            'payment_methods_id': self.payment_method_id.id or self.partner_id.payment_methods_id.id
 #        }
 
-from odoo import models, fields, api
+from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import logging
 
-
 _logger = logging.getLogger(__name__)
-
-class StockWarningWizard(models.TransientModel):
-    _name = 'stock.warning.wizard'
-    _description = 'Stock Insufficient Warning Wizard'
-
-    message = fields.Text(string="Advertencia", readonly=True)
-
-    @api.multi
-    def action_confirm(self):
-        sale_order_id = self.env.context.get('sale_order_id')
-        if sale_order_id:
-            sale_order = self.env['sale.order'].browse(sale_order_id)
-            _logger.warning(f"Pedido {sale_order.name} confirmado a pesar de advertencia de stock insuficiente.")
-            sale_order.sudo().action_confirm()
-        return {'type': 'ir.actions.act_window_close'}
 
 class SaleOrder(models.Model):
     _inherit = "sale.order"
@@ -106,7 +90,7 @@ class SaleOrder(models.Model):
         
         for order in self:
             for picking in order.picking_ids:
-                for move in picking.move_ids_without_package:
+                for move in picking.move_lines:  # En Odoo 12, se usa move_lines
                     if move.reserved_availability < move.product_uom_qty:
                         stock_warnings.append({
                             'product': move.product_id.name,
@@ -143,8 +127,6 @@ class SaleOrder(models.Model):
         # Si no hay advertencias de stock, proceder con la confirmación del pedido
         return super(SaleOrder, self).action_confirm()
 
-from odoo import models, fields, api
-
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -162,10 +144,6 @@ class AccountInvoice(models.Model):
             sale_orders = invoice.invoice_line_ids.mapped('sale_line_ids.order_id')
             if sale_orders:
                 invoice.sale_order_id = sale_orders[0]  # Asociar el primer pedido relacionado (si es múltiple)
-
-
-class AccountInvoice(models.Model):
-    _inherit = "account.invoice"
 
     @api.multi
     def action_invoice_open(self):
@@ -185,7 +163,7 @@ class AccountInvoice(models.Model):
                         pending_moves = []
 
                         # Procesar los movimientos de inventario relacionados
-                        for move in picking.move_ids_without_package:
+                        for move in picking.move_lines:
                             if move.reserved_availability < move.product_uom_qty:
                                 # Si no hay suficiente stock, hacer entrega parcial
                                 partial_moves.append({
@@ -213,7 +191,7 @@ class AccountInvoice(models.Model):
                             picking_copy = picking.copy({
                                 'move_lines': []
                             })
-                            for move in picking.move_ids_without_package:
+                            for move in picking.move_lines:
                                 if move.quantity_done < move.product_uom_qty:
                                     remaining_qty = move.product_uom_qty - move.quantity_done
                                     move_copy = move.copy({
@@ -250,7 +228,7 @@ class AccountInvoice(models.Model):
         for invoice in self:
             if invoice.invoice_id:  # Asegura que estamos trabajando con una nota de crédito
                 original_invoice = invoice.invoice_id  # Factura original relacionada
-                sale_order = self.env['sale.order'].search([('name', '=', original_invoice.origin)])
+                sale_order = original_invoice.sale_order_id  # Ahora usamos el campo relacionado del pedido
 
                 if not sale_order:
                     raise UserError(_("No se encontró el pedido de venta relacionado con la factura original."))
@@ -258,6 +236,7 @@ class AccountInvoice(models.Model):
                 for line in invoice.invoice_line_ids:
                     product = line.product_id
                     if product.type != 'service':
+                        # Verificar que el producto haya salido del inventario
                         related_moves = sale_order.mapped('picking_ids').mapped('move_lines').filtered(
                             lambda move: move.product_id == product and move.state == 'done')
                         
