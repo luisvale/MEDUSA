@@ -77,23 +77,72 @@
 
 from odoo import models, fields, api
 from odoo.exceptions import UserError
+import logging
+
+
+_logger = logging.getLogger(__name__)
+
+class StockWarningWizard(models.TransientModel):
+    _name = 'stock.warning.wizard'
+    _description = 'Stock Insufficient Warning Wizard'
+
+    message = fields.Text(string="Advertencia", readonly=True)
+
+    @api.multi
+    def action_confirm(self):
+        sale_order_id = self.env.context.get('sale_order_id')
+        if sale_order_id:
+            sale_order = self.env['sale.order'].browse(sale_order_id)
+            _logger.warning(f"Pedido {sale_order.name} confirmado a pesar de advertencia de stock insuficiente.")
+            sale_order.sudo().action_confirm()
+        return {'type': 'ir.actions.act_window_close'}
 
 class SaleOrder(models.Model):
     _inherit = "sale.order"
 
     @api.multi
     def action_confirm(self):
-        # Verificar disponibilidad de inventario antes de confirmar el pedido
+        stock_warnings = []
+        
         for order in self:
-            if any(picking.state != 'done' for picking in order.picking_ids):
-                for picking in order.picking_ids:
-                    picking.sudo().action_confirm()
-                    picking.sudo().action_assign()
-                    if not all(move.reserved_availability >= move.product_uom_qty for move in picking.move_ids_without_package):
-                        raise UserError(_('No hay suficiente stock disponible para confirmar el pedido. Por favor, revise el inventario o espere a más stock.'))
-        # Llama al método super si la verificación de stock es exitosa
-        return super(SaleOrder, self).action_confirm()
+            for picking in order.picking_ids:
+                for move in picking.move_ids_without_package:
+                    if move.reserved_availability < move.product_uom_qty:
+                        stock_warnings.append({
+                            'product': move.product_id.name,
+                            'needed_qty': move.product_uom_qty,
+                            'available_qty': move.reserved_availability,
+                        })
 
+        if stock_warnings:
+            message = "\n".join([
+                _("Producto: %s | Cantidad requerida: %s | Cantidad disponible: %s") % (
+                    warning['product'], warning['needed_qty'], warning['available_qty']
+                )
+                for warning in stock_warnings
+            ])
+            full_message = _(
+                "Algunos productos no tienen suficiente disponibilidad para completar el pedido:\n\n%s\n\n"
+                "Si confirma el pedido en este estado, no se podrá hacer la salida de inventario y la facturación no será posible. "
+                "¿Desea continuar con la confirmación?"
+            ) % message
+            # Llama al wizard para advertir al usuario y permitir que continúe si lo desea
+            return {
+                'name': _('Stock insuficiente'),
+                'type': 'ir.actions.act_window',
+                'res_model': 'stock.warning.wizard',
+                'view_mode': 'form',
+                'view_type': 'form',
+                'target': 'new',
+                'context': {
+                    'default_message': full_message,
+                    'sale_order_id': self.id
+                }
+            }
+        
+        # Si no hay advertencias de stock, proceder con la confirmación del pedido
+        return super(SaleOrder, self).action_confirm()
+        
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
