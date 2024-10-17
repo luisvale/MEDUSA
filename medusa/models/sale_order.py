@@ -163,10 +163,16 @@ class AccountInvoice(models.Model):
                             picking.sudo().action_confirm()
                             picking.sudo().action_assign()
 
-                            # Actualizar las cantidades hechas antes de validar
-                            for move in picking.move_lines:
-                                if move.state == 'assigned':  # Asegurarse de que esté asignado
-                                    move.quantity_done = move.product_uom_qty  # Establecer cantidad hecha
+                            # Asignar las cantidades facturadas en qty_done
+                            for invoice_line in invoice.invoice_line_ids:
+                                product = invoice_line.product_id
+                                quantity = invoice_line.quantity
+
+                                # Buscar el movimiento del producto en el picking
+                                for move in picking.move_lines:
+                                    if move.product_id == product:
+                                        # Asignar la cantidad facturada a qty_done
+                                        move.quantity_done = quantity
 
                             # Validar el picking ahora que las cantidades hechas están registradas
                             if picking.state == 'assigned':
