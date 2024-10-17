@@ -142,7 +142,8 @@ class SaleOrder(models.Model):
         
         # Si no hay advertencias de stock, proceder con la confirmación del pedido
         return super(SaleOrder, self).action_confirm()
-        
+
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -150,23 +151,95 @@ class AccountInvoice(models.Model):
     def action_invoice_open(self):
         # Llama al método original para validar la factura
         res = super(AccountInvoice, self).action_invoice_open()
-        # Procesa los movimientos de inventario relacionados con las ventas confirmadas
+
         for invoice in self:
-            if invoice.origin:  # Asegura que la factura tenga un documento de origen
+            if invoice.origin:
                 sale_orders = self.env['sale.order'].search([('name', '=', invoice.origin)])
                 for order in sale_orders:
                     for picking in order.picking_ids:
-                        if picking.state != 'done':
+                        if picking.state not in ['done', 'cancel']:
                             picking.sudo().action_confirm()
                             picking.sudo().action_assign()
-                            # Verificar si hay suficiente stock disponible antes de procesar el picking
-                            if all(move.reserved_availability >= move.product_uom_qty for move in picking.move_ids_without_package):
-                                immediate_rec = self.env['stock.immediate.transfer'].sudo().create({'pick_ids': [(4, picking.id)]})
-                                immediate_rec.process()
-                                if picking.state != 'done':
-                                    for move in picking.move_ids_without_package:
-                                        move.quantity_done = move.product_uom_qty
-                                    picking.sudo().button_validate()
-                            else:
-                                raise UserError(_('No hay suficiente stock disponible para los productos en la factura relacionada con el pedido %s. Por favor, revise el inventario o espere a más stock.' % order.name))
+
+                            partial_moves = []
+                            pending_moves = []
+
+                            for move in picking.move_ids_without_package:
+                                if move.reserved_availability < move.product_uom_qty:
+                                    partial_moves.append({
+                                        'product': move.product_id.name,
+                                        'needed_qty': move.product_uom_qty,
+                                        'available_qty': move.reserved_availability,
+                                    })
+                                    move.quantity_done = move.reserved_availability
+                                else:
+                                    move.quantity_done = move.product_uom_qty
+
+                                if move.quantity_done < move.product_uom_qty:
+                                    pending_moves.append({
+                                        'product': move.product_id.name,
+                                        'pending_qty': move.product_uom_qty - move.quantity_done,
+                                    })
+                            
+                            if picking.state != 'done':
+                                picking.sudo().button_validate()
+
+                            if partial_moves or pending_moves:
+                                message = _("Factura %s: Entrega parcial realizada.\n") % invoice.number
+                                if partial_moves:
+                                    partial_msg = "\n".join([
+                                        _("Producto: %s | Cantidad requerida: %s | Cantidad entregada: %s") % (
+                                            move['product'], move['needed_qty'], move['available_qty']
+                                        ) for move in partial_moves
+                                    ])
+                                    message += _("Movimientos parciales:\n%s\n") % partial_msg
+                                
+                                if pending_moves:
+                                    pending_msg = "\n".join([
+                                        _("Producto: %s | Cantidad pendiente: %s") % (
+                                            move['product'], move['pending_qty']
+                                        ) for move in pending_moves
+                                    ])
+                                    message += _("Movimientos pendientes:\n%s\n") % pending_msg
+                                
+                                _logger.warning(message)
+                                invoice.message_post(body=message)
+        
         return res
+
+    @api.multi
+    def action_credit_note_create(self):
+        for invoice in self:
+            if invoice.invoice_id:  # Asegura que estamos trabajando con una nota de crédito
+                original_invoice = invoice.invoice_id  # Factura original relacionada
+                sale_order = self.env['sale.order'].search([('name', '=', original_invoice.origin)])
+
+                if not sale_order:
+                    raise UserError(_("No se encontró el pedido de venta relacionado con la factura original."))
+
+                for line in invoice.invoice_line_ids:
+                    product = line.product_id
+                    if product.type != 'service':
+                        related_moves = sale_order.mapped('picking_ids').mapped('move_lines').filtered(
+                            lambda move: move.product_id == product and move.state == 'done')
+                        
+                        if not related_moves:
+                            raise UserError(_(
+                                "El producto %s no ha salido del inventario en la factura original. La nota de crédito no procede."
+                            ) % product.name)
+                        
+                        # Crear movimiento de devolución por los productos devueltos
+                        picking = sale_order.picking_ids.filtered(lambda p: p.state == 'done')
+                        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+                        return_wizard.product_return_moves.filtered(lambda r: r.product_id == product).update({
+                            'quantity': line.quantity
+                        })
+                        return_wizard.create_returns()
+                        _logger.info(
+                            "Se ha creado una devolución para el producto %s asociado a la factura %s",
+                            product.name, original_invoice.number
+                        )
+                        
+                invoice.message_post(body=_("Se ha creado una devolución relacionada con la nota de crédito para el pedido de venta: %s" % sale_order.name))
+
+        return super(AccountInvoice, self).action_credit_note_create()
