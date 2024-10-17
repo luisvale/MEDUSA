@@ -143,6 +143,25 @@ class SaleOrder(models.Model):
         # Si no hay advertencias de stock, proceder con la confirmación del pedido
         return super(SaleOrder, self).action_confirm()
 
+from odoo import models, fields, api
+
+class AccountInvoice(models.Model):
+    _inherit = "account.invoice"
+
+    sale_order_id = fields.Many2one(
+        comodel_name="sale.order", 
+        string="Pedido de Venta Relacionado",
+        compute="_compute_sale_order_id",
+        store=True
+    )
+
+    @api.depends('invoice_line_ids.sale_line_ids.order_id')
+    def _compute_sale_order_id(self):
+        for invoice in self:
+            # Asocia el pedido de venta basado en las líneas de pedido
+            sale_orders = invoice.invoice_line_ids.mapped('sale_line_ids.order_id')
+            if sale_orders:
+                invoice.sale_order_id = sale_orders[0]  # Asociar el primer pedido relacionado (si es múltiple)
 
 
 class AccountInvoice(models.Model):
@@ -154,76 +173,75 @@ class AccountInvoice(models.Model):
         res = super(AccountInvoice, self).action_invoice_open()
 
         for invoice in self:
-            if invoice.origin:
-                sale_orders = self.env['sale.order'].search([('name', '=', invoice.origin)])
-                for order in sale_orders:
-                    for picking in order.picking_ids:
-                        if picking.state in ['confirmed', 'assigned', 'waiting']:
-                            # Confirmar el picking si está en estado preparado o asignado
-                            picking.sudo().action_confirm()
-                            picking.sudo().action_assign()
+            if invoice.sale_order_id:  # Usamos el campo relacionado al pedido de venta
+                order = invoice.sale_order_id
+                for picking in order.picking_ids:
+                    if picking.state in ['confirmed', 'assigned', 'waiting']:
+                        # Confirmar el picking si está en estado preparado o asignado
+                        picking.sudo().action_confirm()
+                        picking.sudo().action_assign()
 
-                            partial_moves = []
-                            pending_moves = []
+                        partial_moves = []
+                        pending_moves = []
 
-                            # Procesar los movimientos de inventario relacionados
-                            for move in picking.move_ids_without_package:
-                                if move.reserved_availability < move.product_uom_qty:
-                                    # Si no hay suficiente stock, hacer entrega parcial
-                                    partial_moves.append({
-                                        'product': move.product_id.name,
-                                        'needed_qty': move.product_uom_qty,
-                                        'available_qty': move.reserved_availability,
-                                    })
-                                    move.quantity_done = move.reserved_availability
-                                else:
-                                    move.quantity_done = move.product_uom_qty
-
-                                # Si quedó pendiente parte del movimiento por falta de stock
-                                if move.quantity_done < move.product_uom_qty:
-                                    pending_moves.append({
-                                        'product': move.product_id.name,
-                                        'pending_qty': move.product_uom_qty - move.quantity_done,
-                                    })
-
-                            # Validar el picking para confirmar lo entregado
-                            if picking.state not in ['done', 'cancel']:
-                                picking.sudo().button_validate()
-
-                            # Manejo de movimientos pendientes: Crear un nuevo movimiento para lo pendiente
-                            if pending_moves:
-                                picking_copy = picking.copy({
-                                    'move_lines': []
+                        # Procesar los movimientos de inventario relacionados
+                        for move in picking.move_ids_without_package:
+                            if move.reserved_availability < move.product_uom_qty:
+                                # Si no hay suficiente stock, hacer entrega parcial
+                                partial_moves.append({
+                                    'product': move.product_id.name,
+                                    'needed_qty': move.product_uom_qty,
+                                    'available_qty': move.reserved_availability,
                                 })
-                                for move in picking.move_ids_without_package:
-                                    if move.quantity_done < move.product_uom_qty:
-                                        remaining_qty = move.product_uom_qty - move.quantity_done
-                                        move_copy = move.copy({
-                                            'product_uom_qty': remaining_qty,
-                                            'picking_id': picking_copy.id,
-                                        })
-                                picking_copy.action_confirm()
+                                move.quantity_done = move.reserved_availability
+                            else:
+                                move.quantity_done = move.product_uom_qty
 
-                            # Registrar el evento en el logger y en la factura
-                            message = _("Factura %s: Entrega parcial realizada.\n") % invoice.number
-                            if partial_moves:
-                                partial_msg = "\n".join([
-                                    _("Producto: %s | Cantidad requerida: %s | Cantidad entregada: %s") % (
-                                        move['product'], move['needed_qty'], move['available_qty']
-                                    ) for move in partial_moves
-                                ])
-                                message += _("Movimientos parciales:\n%s\n") % partial_msg
-                            
-                            if pending_moves:
-                                pending_msg = "\n".join([
-                                    _("Producto: %s | Cantidad pendiente: %s") % (
-                                        move['product'], move['pending_qty']
-                                    ) for move in pending_moves
-                                ])
-                                message += _("Movimientos pendientes registrados en un nuevo picking.\n%s\n") % pending_msg
+                            # Si quedó pendiente parte del movimiento por falta de stock
+                            if move.quantity_done < move.product_uom_qty:
+                                pending_moves.append({
+                                    'product': move.product_id.name,
+                                    'pending_qty': move.product_uom_qty - move.quantity_done,
+                                })
 
-                            _logger.info(message)
-                            invoice.message_post(body=message)
+                        # Validar el picking para confirmar lo entregado
+                        if picking.state not in ['done', 'cancel']:
+                            picking.sudo().button_validate()
+
+                        # Manejo de movimientos pendientes: Crear un nuevo movimiento para lo pendiente
+                        if pending_moves:
+                            picking_copy = picking.copy({
+                                'move_lines': []
+                            })
+                            for move in picking.move_ids_without_package:
+                                if move.quantity_done < move.product_uom_qty:
+                                    remaining_qty = move.product_uom_qty - move.quantity_done
+                                    move_copy = move.copy({
+                                        'product_uom_qty': remaining_qty,
+                                        'picking_id': picking_copy.id,
+                                    })
+                            picking_copy.action_confirm()
+
+                        # Registrar el evento en el logger y en la factura
+                        message = _("Factura %s: Entrega parcial realizada.\n") % invoice.number
+                        if partial_moves:
+                            partial_msg = "\n".join([
+                                _("Producto: %s | Cantidad requerida: %s | Cantidad entregada: %s") % (
+                                    move['product'], move['needed_qty'], move['available_qty']
+                                ) for move in partial_moves
+                            ])
+                            message += _("Movimientos parciales:\n%s\n") % partial_msg
+                        
+                        if pending_moves:
+                            pending_msg = "\n".join([
+                                _("Producto: %s | Cantidad pendiente: %s") % (
+                                    move['product'], move['pending_qty']
+                                ) for move in pending_moves
+                            ])
+                            message += _("Movimientos pendientes registrados en un nuevo picking.\n%s\n") % pending_msg
+
+                        _logger.info(message)
+                        invoice.message_post(body=message)
 
         return res
 
