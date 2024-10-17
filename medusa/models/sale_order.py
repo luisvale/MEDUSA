@@ -145,8 +145,6 @@ class SaleOrder(models.Model):
 
 
 
-
-
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -166,24 +164,12 @@ class AccountInvoice(models.Model):
                             picking.sudo().action_confirm()
                             picking.sudo().action_assign()
 
-                            # Iterar sobre las líneas de la factura
-                            for invoice_line in invoice.invoice_line_ids:
-                                product = invoice_line.product_id
-                                quantity = invoice_line.quantity
+                            # Asignar automáticamente las cantidades reservadas como qty_done
+                            for move_line in picking.move_line_ids:
+                                if move_line.product_uom_qty > 0:
+                                    move_line.qty_done = move_line.product_uom_qty
 
-                                # Buscar en stock.move.line el movimiento relacionado
-                                move_lines = self.env['stock.move.line'].search([
-                                    ('picking_id', '=', picking.id),
-                                    ('product_id', '=', product.id),
-                                    ('move_id', '!=', False)
-                                ])
-
-                                # Asignar la cantidad facturada a qty_done en cada línea
-                                for move_line in move_lines:
-                                    _logger.info(f"Asignando {quantity} de {product.name} en qty_done para el move_line {move_line.id}.")
-                                    move_line.qty_done = quantity
-
-                            # Validar el picking si se han actualizado los movimientos
+                            # Validar el picking ahora que las cantidades hechas están registradas
                             if picking.state in ['confirmed', 'assigned']:
                                 picking.sudo().button_validate()
                                 _logger.info(f"Picking {picking.name} validado para la factura {invoice.number}")
