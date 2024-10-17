@@ -145,6 +145,7 @@ class SaleOrder(models.Model):
 
 
 
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -155,32 +156,34 @@ class AccountInvoice(models.Model):
 
         for invoice in self:
             if invoice.origin:
+                # Buscar el pedido relacionado
                 sale_orders = self.env['sale.order'].search([('name', '=', invoice.origin)])
                 for order in sale_orders:
+                    # Verificar los pickings asociados al pedido
                     for picking in order.picking_ids:
                         if picking.state in ['confirmed', 'assigned', 'waiting']:
-                            # Confirmar y asignar el picking si no está hecho
                             picking.sudo().action_confirm()
                             picking.sudo().action_assign()
 
-                            # Asignar las cantidades facturadas en qty_done
+                            # Iterar sobre las líneas de factura para asignar la cantidad facturada en qty_done
                             for invoice_line in invoice.invoice_line_ids:
                                 product = invoice_line.product_id
                                 quantity = invoice_line.quantity
 
-                                # Buscar el movimiento del producto en el picking
+                                # Buscar el movimiento del producto dentro del picking
                                 for move in picking.move_lines:
                                     if move.product_id == product:
-                                        # Asignar la cantidad facturada a qty_done
+                                        _logger.info(f"Asignando {quantity} de {product.name} en qty_done para el picking {picking.name}.")
+                                        # Asignar la cantidad facturada al campo quantity_done
                                         move.quantity_done = quantity
 
-                            # Validar el picking ahora que las cantidades hechas están registradas
-                            if picking.state == 'assigned':
+                            # Validar el picking si se han actualizado los movimientos
+                            if picking.state in ['confirmed', 'assigned']:
                                 picking.sudo().button_validate()
-
-                            # Registrar lo que sucedió en el logger y en la factura
-                            _logger.info(f"Picking {picking.name} validado para la factura {invoice.number}")
-                            invoice.message_post(body=_("El picking %s ha sido validado para esta factura.") % picking.name)
+                                _logger.info(f"Picking {picking.name} validado para la factura {invoice.number}")
+                                invoice.message_post(body=_("El picking %s ha sido validado para esta factura.") % picking.name)
+                            else:
+                                _logger.warning(f"El picking {picking.name} no está en un estado válido para ser validado.")
 
         return res
 
