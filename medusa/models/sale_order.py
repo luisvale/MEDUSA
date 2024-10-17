@@ -143,6 +143,23 @@ class SaleOrder(models.Model):
         # Si no hay advertencias de stock, proceder con la confirmación del pedido
         return super(SaleOrder, self).action_confirm()
 
+    @api.multi
+        def action_confirm(self):
+            # Confirmar el pedido de venta y actualizar qty_done en los movimientos de inventario
+            super(SaleOrder, self).action_confirm()
+
+            for order in self:
+                for picking in order.picking_ids:
+                    if picking.state in ['confirmed', 'assigned', 'waiting']:
+                        picking.sudo().action_confirm()
+                        picking.sudo().action_assign()
+
+                        # Asignar automáticamente qty_done con la cantidad reservada
+                        for move in picking.move_lines:
+                            move.qty_done = move.reserved_availability
+
+            return True
+
 
 
 class AccountInvoice(models.Model):
@@ -155,27 +172,17 @@ class AccountInvoice(models.Model):
 
         for invoice in self:
             if invoice.origin:
-                # Buscar el pedido relacionado
+                # Buscar el pedido de venta relacionado
                 sale_orders = self.env['sale.order'].search([('name', '=', invoice.origin)])
                 for order in sale_orders:
                     # Verificar los pickings asociados al pedido
                     for picking in order.picking_ids:
-                        if picking.state in ['confirmed', 'assigned', 'waiting']:
-                            picking.sudo().action_confirm()
-                            picking.sudo().action_assign()
+                        if picking.state in ['confirmed', 'assigned']:
+                            # Validar los movimientos de inventario relacionados
+                            picking.sudo().button_validate()
 
-                            # Asignar automáticamente las cantidades reservadas como qty_done
-                            for move_line in picking.move_line_ids:
-                                if move_line.product_uom_qty > 0:
-                                    move_line.qty_done = move_line.product_uom_qty
-
-                            # Validar el picking ahora que las cantidades hechas están registradas
-                            if picking.state in ['confirmed', 'assigned']:
-                                picking.sudo().button_validate()
-                                _logger.info(f"Picking {picking.name} validado para la factura {invoice.number}")
-                                invoice.message_post(body=_("El picking %s ha sido validado para esta factura.") % picking.name)
-                            else:
-                                _logger.warning(f"El picking {picking.name} no está en un estado válido para ser validado.")
+                            # Registrar en la factura que se validaron los movimientos
+                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados.") % order.name)
 
         return res
 
