@@ -163,7 +163,7 @@ class AccountInvoice(models.Model):
                         pending_moves = []
 
                         # Procesar los movimientos de inventario relacionados
-                        for move in picking.move_lines:  # En Odoo 12, move_ids_without_package es move_lines
+                        for move in picking.move_lines:
                             if move.reserved_availability < move.product_uom_qty:
                                 # Si no hay suficiente stock, hacer entrega parcial
                                 partial_moves.append({
@@ -222,3 +222,41 @@ class AccountInvoice(models.Model):
                         invoice.message_post(body=message)
 
         return res
+
+    @api.multi
+    def action_credit_note_create(self):
+        for invoice in self:
+            if invoice.invoice_id:  # Asegura que estamos trabajando con una nota de crédito
+                original_invoice = invoice.invoice_id  # Factura original relacionada
+                sale_order = original_invoice.sale_order_id  # Ahora usamos el campo relacionado del pedido
+
+                if not sale_order:
+                    raise UserError(_("No se encontró el pedido de venta relacionado con la factura original."))
+
+                for line in invoice.invoice_line_ids:
+                    product = line.product_id
+                    if product.type != 'service':
+                        # Verificar que el producto haya salido del inventario
+                        related_moves = sale_order.mapped('picking_ids').mapped('move_lines').filtered(
+                            lambda move: move.product_id == product and move.state == 'done')
+                        
+                        if not related_moves:
+                            raise UserError(_(
+                                "El producto %s no ha salido del inventario en la factura original. La nota de crédito no procede."
+                            ) % product.name)
+                        
+                        # Crear movimiento de devolución por los productos devueltos
+                        picking = sale_order.picking_ids.filtered(lambda p: p.state == 'done')
+                        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+                        return_wizard.product_return_moves.filtered(lambda r: r.product_id == product).update({
+                            'quantity': line.quantity
+                        })
+                        return_wizard.create_returns()
+                        _logger.info(
+                            "Se ha creado una devolución para el producto %s asociado a la factura %s",
+                            product.name, original_invoice.number
+                        )
+                        
+                invoice.message_post(body=_("Se ha creado una devolución relacionada con la nota de crédito para el pedido de venta: %s" % sale_order.name))
+
+        return super(AccountInvoice, self).action_credit_note_create()
