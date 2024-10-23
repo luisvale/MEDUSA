@@ -155,6 +155,7 @@ class SaleOrder(models.Model):
 
         return True
 
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -171,21 +172,22 @@ class AccountInvoice(models.Model):
                     # Verificar los pickings asociados al pedido
                     for picking in order.picking_ids:
                         if picking.state in ['confirmed', 'assigned']:
-                            # Actualizar qty_done con la cantidad facturada antes de validar
-                            for invoice_line in invoice.invoice_line_ids:
-                                product = invoice_line.product_id
-                                quantity = invoice_line.quantity
-
-                                # Buscar el movimiento del producto en el picking
-                                for move in picking.move_lines:
-                                    if move.product_id == product:
-                                        move.qty_done = quantity
+                            # Actualizar qty_done con la cantidad reservada antes de validar
+                            for move in picking.move_lines:
+                                if move.reserved_availability > 0:
+                                    move.qty_done = move.reserved_availability
 
                             # Validar los movimientos de inventario relacionados
                             picking.sudo().button_validate()
 
-                            # Registrar en la factura que se validaron los movimientos
-                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados.") % order.name)
+                            # Ejecutar el proceso de transferencia inmediata si es necesario
+                            immediate_transfer = self.env['stock.immediate.transfer'].create({
+                                'pick_ids': [(4, picking.id)]
+                            })
+                            immediate_transfer.process()
+
+                            # Registrar en la factura que se validaron los movimientos y se hizo la transferencia
+                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y la transferencia inmediata ha sido procesada.") % order.name)
 
         return res
 
