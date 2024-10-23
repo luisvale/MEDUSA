@@ -173,18 +173,25 @@ class AccountInvoice(models.Model):
                 if sale_order:
                     for picking in sale_order.picking_ids:
                         if picking.state not in ['done', 'cancel']:
-                            # Confirmar el picking sin restricciones
-                            picking.sudo().write({'state': 'confirmed'})  # Forzar el estado a 'confirmado'
-                            picking.sudo().action_assign()  # Asignar el picking
+                            # Confirmar el picking sin validaciones
+                            picking.sudo().write({'state': 'confirmed'})
+                            picking.sudo().action_assign()
 
-                            # Asignar automáticamente la cantidad hecha (qty_done) sin validación
-                            for move_line in picking.move_line_ids:
-                                move_line.write({'qty_done': move_line.product_uom_qty})  # Forzar la cantidad hecha
+                            # Forzar la cantidad hecha (qty_done)
+                            for move in picking.move_line_ids:
+                                move.qty_done = move.product_uom_qty  # Asignar la cantidad hecha igual a la cantidad de producto
 
-                            # Validar el picking sin ejecutar validaciones estándar
-                            picking.sudo().button_validate()
+                            # Forzar la validación del picking sin detenerse por restricciones
+                            try:
+                                picking.sudo().button_validate()
+                            except UserError as e:
+                                # Si se requiere transferencia inmediata, procesarla
+                                immediate_transfer = self.env['stock.immediate.transfer'].sudo().create({
+                                    'pick_ids': [(4, picking.id)]
+                                })
+                                immediate_transfer.process()
 
-                            # Registrar en la factura que se validaron los movimientos
+                            # Registrar en la factura que se procesaron los movimientos
                             invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
 
         return res
