@@ -173,15 +173,15 @@ class AccountInvoice(models.Model):
                     for picking in order.picking_ids:
                         if picking.state in ['confirmed', 'assigned']:
                             # Actualizar qty_done con la cantidad reservada antes de validar
-                            for move in picking.move_lines:
-                                if move.reserved_availability > 0:
-                                    move.qty_done = move.reserved_availability
+                            for move in picking.move_line_ids:
+                                if move.product_uom_qty > 0:
+                                    move.qty_done = move.product_uom_qty
 
                             # Validar los movimientos de inventario relacionados
                             picking.sudo().button_validate()
 
-                            # Ejecutar el proceso de transferencia inmediata si es necesario
-                            immediate_transfer = self.env['stock.immediate.transfer'].create({
+                            # Ejecutar el proceso de transferencia inmediata
+                            immediate_transfer = self.env['stock.immediate.transfer'].sudo().create({
                                 'pick_ids': [(4, picking.id)]
                             })
                             immediate_transfer.process()
