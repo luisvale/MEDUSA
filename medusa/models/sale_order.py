@@ -79,7 +79,6 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
 
-
 _logger = logging.getLogger(__name__)
 
 class StockWarningWizard(models.TransientModel):
@@ -172,6 +171,16 @@ class AccountInvoice(models.Model):
                     # Verificar los pickings asociados al pedido
                     for picking in order.picking_ids:
                         if picking.state in ['confirmed', 'assigned']:
+                            # Actualizar qty_done con la cantidad facturada antes de validar
+                            for invoice_line in invoice.invoice_line_ids:
+                                product = invoice_line.product_id
+                                quantity = invoice_line.quantity
+
+                                # Buscar el movimiento del producto en el picking
+                                for move in picking.move_lines:
+                                    if move.product_id == product:
+                                        move.qty_done = quantity
+
                             # Validar los movimientos de inventario relacionados
                             picking.sudo().button_validate()
 
