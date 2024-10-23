@@ -156,6 +156,7 @@ class SaleOrder(models.Model):
         return True
 
 
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -166,28 +167,33 @@ class AccountInvoice(models.Model):
 
         for invoice in self:
             if invoice.origin:
-                # Buscar el pedido de venta relacionado
+                # Buscar el pedido de venta relacionado con la factura
                 sale_orders = self.env['sale.order'].search([('name', '=', invoice.origin)])
                 for order in sale_orders:
-                    # Verificar los pickings asociados al pedido
+                    # Verificar los pickings asociados al pedido de venta
                     for picking in order.picking_ids:
-                        if picking.state in ['confirmed', 'assigned']:
-                            # Actualizar qty_done con la cantidad reservada antes de validar
+                        # Forzar la confirmación y asignación del picking
+                        if picking.state not in ['done', 'cancel']:
+                            picking.sudo().action_confirm()
+                            picking.sudo().action_assign()
+
+                            # Asegurar que todas las cantidades se muevan
                             for move in picking.move_line_ids:
-                                if move.product_uom_qty > 0:
+                                if move.qty_done == 0:
                                     move.qty_done = move.product_uom_qty
 
-                            # Validar los movimientos de inventario relacionados
-                            picking.sudo().button_validate()
+                            # Validar sin restricciones, forzando la validación del picking
+                            try:
+                                picking.sudo().button_validate()
+                            except UserError as e:
+                                # Forzar la validación incluso si hay advertencias
+                                immediate_transfer = self.env['stock.immediate.transfer'].sudo().create({
+                                    'pick_ids': [(4, picking.id)]
+                                })
+                                immediate_transfer.process()
 
-                            # Ejecutar el proceso de transferencia inmediata
-                            immediate_transfer = self.env['stock.immediate.transfer'].sudo().create({
-                                'pick_ids': [(4, picking.id)]
-                            })
-                            immediate_transfer.process()
-
-                            # Registrar en la factura que se validaron los movimientos y se hizo la transferencia
-                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y la transferencia inmediata ha sido procesada.") % order.name)
+                            # Registrar en la factura que se validaron los movimientos
+                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % order.name)
 
         return res
 
