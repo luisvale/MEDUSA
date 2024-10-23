@@ -156,6 +156,43 @@ class SaleOrder(models.Model):
         return True
 
 
+class PickingValidationWizard(models.TransientModel):
+    _name = 'picking.validation.wizard'
+    _description = 'Wizard para validar los pickings desde la factura'
+
+    invoice_id = fields.Many2one('account.invoice', string="Factura", required=True)
+    picking_ids = fields.Many2many('stock.picking', string="Pickings a Validar")
+
+    @api.model
+    def default_get(self, fields):
+        res = super(PickingValidationWizard, self).default_get(fields)
+        invoice_id = self.env.context.get('active_id')
+        invoice = self.env['account.invoice'].browse(invoice_id)
+        
+        if invoice.origin:
+            sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
+            if sale_order:
+                res['picking_ids'] = [(6, 0, sale_order.picking_ids.ids)]
+                res['invoice_id'] = invoice.id
+        return res
+
+    def action_validate_pickings(self):
+        for picking in self.picking_ids:
+            if picking.state not in ['done', 'cancel']:
+                picking.sudo().action_confirm()
+                picking.sudo().action_assign()
+
+                # Asignar automáticamente la cantidad hecha (qty_done)
+                for move in picking.move_line_ids:
+                    move.qty_done = move.product_uom_qty  # Asignar la cantidad hecha igual a la cantidad de producto
+
+                # Forzar la validación del picking
+                picking.sudo().button_validate()
+
+        # Registrar en la factura que los movimientos han sido validados
+        self.invoice_id.message_post(body=_("Los movimientos de inventario asociados han sido confirmados y procesados desde el wizard."))
+        return {'type': 'ir.actions.act_window_close'}
+
 
 
 class AccountInvoice(models.Model):
@@ -163,38 +200,14 @@ class AccountInvoice(models.Model):
 
     @api.multi
     def action_invoice_open(self):
-        # Llamar al método original para validar la factura
-        res = super(AccountInvoice, self).action_invoice_open()
-
-        for invoice in self:
-            if invoice.origin:
-                # Buscar el pedido de venta relacionado con la factura
-                sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
-                if sale_order:
-                    for picking in sale_order.picking_ids:
-                        if picking.state not in ['done', 'cancel']:
-                            # Confirmar el picking sin validaciones
-                            picking.sudo().write({'state': 'confirmed'})
-                            picking.sudo().action_assign()
-
-                            # Forzar la cantidad hecha (qty_done)
-                            for move in picking.move_line_ids:
-                                move.qty_done = move.product_uom_qty  # Asignar la cantidad hecha igual a la cantidad de producto
-
-                            # Forzar la validación del picking sin detenerse por restricciones
-                            try:
-                                picking.sudo().button_validate()
-                            except UserError as e:
-                                # Si se requiere transferencia inmediata, procesarla
-                                immediate_transfer = self.env['stock.immediate.transfer'].sudo().create({
-                                    'pick_ids': [(4, picking.id)]
-                                })
-                                immediate_transfer.process()
-
-                            # Registrar en la factura que se procesaron los movimientos
-                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
-
-        return res
+        # En lugar de validar automáticamente, abrimos el wizard de validación de pickings
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'picking.validation.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {'default_invoice_id': self.id}
+        }
 
     @api.multi
     def action_credit_note_create(self):
