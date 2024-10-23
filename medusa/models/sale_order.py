@@ -157,42 +157,36 @@ class SaleOrder(models.Model):
 
 
 
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
     @api.multi
     def action_invoice_open(self):
-        # Llama al método original para validar la factura
+        # Llamar al método original para validar la factura
         res = super(AccountInvoice, self).action_invoice_open()
 
         for invoice in self:
             if invoice.origin:
                 # Buscar el pedido de venta relacionado con la factura
-                sale_orders = self.env['sale.order'].search([('name', '=', invoice.origin)])
-                for order in sale_orders:
-                    # Verificar los pickings asociados al pedido de venta
-                    for picking in order.picking_ids:
+                sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
+                if sale_order:
+                    for picking in sale_order.picking_ids:
                         if picking.state not in ['done', 'cancel']:
-                            # Confirmar y asignar el picking
+                            # Confirmar y asignar el picking sin restricciones
                             picking.sudo().action_confirm()
                             picking.sudo().action_assign()
 
-                            # Asignar automáticamente la cantidad completa reservada a qty_done
+                            # Asignar la cantidad hecha automáticamente sin validación
                             for move_line in picking.move_line_ids:
-                                move_line.qty_done = move_line.product_uom_qty
+                                move_line.qty_done = move_line.product_uom_qty  # Asigna todas las cantidades reservadas
 
-                            # Intentar validar el picking
-                            try:
-                                picking.sudo().button_validate()
-                            except UserError as e:
-                                # Si se lanza una excepción, usar la transferencia inmediata
-                                immediate_transfer = self.env['stock.immediate.transfer'].sudo().create({
-                                    'pick_ids': [(4, picking.id)]
-                                })
-                                immediate_transfer.process()
+                            # Forzar la validación del picking sin restricciones
+                            picking.sudo().force_assign()  # Forzar asignación de productos
+                            picking.sudo().button_validate()  # Validar el picking sin advertencias
 
-                            # Registrar en la factura que se procesaron los movimientos
-                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % order.name)
+                            # Registrar un mensaje en la factura
+                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados sin restricciones.") % sale_order.name)
 
         return res
 
