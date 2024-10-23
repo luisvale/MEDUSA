@@ -173,20 +173,19 @@ class AccountInvoice(models.Model):
                 if sale_order:
                     for picking in sale_order.picking_ids:
                         if picking.state not in ['done', 'cancel']:
-                            # Confirmar y asignar el picking sin restricciones
-                            picking.sudo().action_confirm()
-                            picking.sudo().action_assign()
+                            # Confirmar el picking sin restricciones
+                            picking.sudo().write({'state': 'confirmed'})  # Forzar el estado a 'confirmado'
+                            picking.sudo().action_assign()  # Asignar el picking
 
-                            # Asignar la cantidad hecha automáticamente sin validación
+                            # Asignar automáticamente la cantidad hecha (qty_done) sin validación
                             for move_line in picking.move_line_ids:
-                                move_line.qty_done = move_line.product_uom_qty  # Asigna todas las cantidades reservadas
+                                move_line.write({'qty_done': move_line.product_uom_qty})  # Forzar la cantidad hecha
 
-                            # Forzar la validación del picking sin restricciones
-                            picking.sudo().force_assign()  # Forzar asignación de productos
-                            picking.sudo().button_validate()  # Validar el picking sin advertencias
+                            # Validar el picking sin ejecutar validaciones estándar
+                            picking.sudo().button_validate()
 
-                            # Registrar un mensaje en la factura
-                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados sin restricciones.") % sale_order.name)
+                            # Registrar en la factura que se validaron los movimientos
+                            invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
 
         return res
 
