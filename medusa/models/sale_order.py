@@ -195,27 +195,46 @@ class PickingValidationWizard(models.TransientModel):
         return {'type': 'ir.actions.act_window_close'}
 
 
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
+    # Campo Many2one que relaciona la factura con el pedido de venta
+    sale_order_id = fields.Many2one('sale.order', string="Pedido de Venta Relacionado", readonly=True)
+
+    @api.onchange('origin')
+    def _onchange_origin(self):
+        # Automáticamente rellenar el campo sale_order_id si hay un pedido relacionado
+        if self.origin:
+            sale_order = self.env['sale.order'].search([('name', '=', self.origin)], limit=1)
+            if sale_order:
+                self.sale_order_id = sale_order
+
     @api.multi
     def action_invoice_open(self):
-        # Detener el proceso automático y abrir el wizard para validar pickings
-        for invoice in self:
-            if invoice.origin:
-                sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
-                if sale_order and sale_order.picking_ids:
-                    # Llamar al wizard si hay pickings asociados
-                    return {
-                        'type': 'ir.actions.act_window',
-                        'res_model': 'picking.validation.wizard',
-                        'view_mode': 'form',
-                        'target': 'new',
-                        'context': {'default_invoice_id': invoice.id}
-                    }
+        # Llamar al método original para validar la factura
+        res = super(AccountInvoice, self).action_invoice_open()
 
-        # Si no hay pickings o no es necesario, continuar con la validación normal
-        return super(AccountInvoice, self).action_invoice_open()
+        for invoice in self:
+            if invoice.sale_order_id:
+                # Obtener los pickings relacionados al pedido de venta
+                sale_order = invoice.sale_order_id
+                for picking in sale_order.picking_ids:
+                    if picking.state not in ['done', 'cancel']:
+                        picking.sudo().action_confirm()
+                        picking.sudo().action_assign()
+
+                        # Asignar automáticamente la cantidad hecha (qty_done)
+                        for move_line in picking.move_line_ids:
+                            move_line.qty_done = move_line.product_uom_qty  # Asignar la cantidad hecha igual a la reservada
+
+                        # Validar el picking forzando la validación
+                        picking.sudo().button_validate()
+
+                # Registrar en la factura que los movimientos de inventario han sido validados
+                invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
+
+        return res
 
     @api.multi
     def action_credit_note_create(self):
