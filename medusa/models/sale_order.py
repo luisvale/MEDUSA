@@ -172,27 +172,26 @@ class AccountInvoice(models.Model):
                 for order in sale_orders:
                     # Verificar los pickings asociados al pedido de venta
                     for picking in order.picking_ids:
-                        # Forzar la confirmación y asignación del picking
                         if picking.state not in ['done', 'cancel']:
+                            # Confirmar y asignar el picking
                             picking.sudo().action_confirm()
                             picking.sudo().action_assign()
 
-                            # Asegurar que todas las cantidades se muevan
-                            for move in picking.move_line_ids:
-                                if move.qty_done == 0:
-                                    move.qty_done = move.product_uom_qty
+                            # Asignar automáticamente la cantidad completa reservada a qty_done
+                            for move_line in picking.move_line_ids:
+                                move_line.qty_done = move_line.product_uom_qty
 
-                            # Validar sin restricciones, forzando la validación del picking
+                            # Intentar validar el picking
                             try:
                                 picking.sudo().button_validate()
                             except UserError as e:
-                                # Forzar la validación incluso si hay advertencias
+                                # Si se lanza una excepción, usar la transferencia inmediata
                                 immediate_transfer = self.env['stock.immediate.transfer'].sudo().create({
                                     'pick_ids': [(4, picking.id)]
                                 })
                                 immediate_transfer.process()
 
-                            # Registrar en la factura que se validaron los movimientos
+                            # Registrar en la factura que se procesaron los movimientos
                             invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % order.name)
 
         return res
