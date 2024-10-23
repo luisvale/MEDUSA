@@ -74,7 +74,6 @@
 #            'transaction_ids': [(6, 0, self.transaction_ids.ids)],
 #            'payment_methods_id': self.payment_method_id.id or self.partner_id.payment_methods_id.id
 #        }
-
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
@@ -151,7 +150,8 @@ class SaleOrder(models.Model):
 
                     # Asignar automáticamente qty_done con la cantidad reservada
                     for move in picking.move_lines:
-                        move.qty_done = move.reserved_availability
+                        if move.reserved_availability > 0:
+                            move.qty_done = move.reserved_availability
 
         return True
 
