@@ -156,17 +156,18 @@ class SaleOrder(models.Model):
         return True
 
 
+
 class PickingValidationWizard(models.TransientModel):
     _name = 'picking.validation.wizard'
-    _description = 'Wizard para validar los pickings desde la factura'
+    _description = 'Wizard para validar los pickings asociados a una factura'
 
     invoice_id = fields.Many2one('account.invoice', string="Factura", required=True)
-    picking_ids = fields.Many2many('stock.picking', string="Pickings a Validar")
+    picking_ids = fields.Many2many('stock.picking', string="Pickings a validar", readonly=True)
 
     @api.model
     def default_get(self, fields):
         res = super(PickingValidationWizard, self).default_get(fields)
-        invoice_id = self.env.context.get('active_id')
+        invoice_id = self.env.context.get('default_invoice_id')
         invoice = self.env['account.invoice'].browse(invoice_id)
         
         if invoice.origin:
@@ -183,16 +184,15 @@ class PickingValidationWizard(models.TransientModel):
                 picking.sudo().action_assign()
 
                 # Asignar automáticamente la cantidad hecha (qty_done)
-                for move in picking.move_line_ids:
-                    move.qty_done = move.product_uom_qty  # Asignar la cantidad hecha igual a la cantidad de producto
+                for move_line in picking.move_line_ids:
+                    move_line.qty_done = move_line.product_uom_qty  # Asignar la cantidad hecha
 
                 # Forzar la validación del picking
                 picking.sudo().button_validate()
 
-        # Registrar en la factura que los movimientos han sido validados
-        self.invoice_id.message_post(body=_("Los movimientos de inventario asociados han sido confirmados y procesados desde el wizard."))
+        # Registrar en la factura que se validaron los movimientos
+        self.invoice_id.message_post(body=_("Los movimientos de inventario relacionados al pedido han sido validados desde el wizard."))
         return {'type': 'ir.actions.act_window_close'}
-
 
 
 class AccountInvoice(models.Model):
@@ -200,14 +200,22 @@ class AccountInvoice(models.Model):
 
     @api.multi
     def action_invoice_open(self):
-        # En lugar de validar automáticamente, abrimos el wizard de validación de pickings
-        return {
-            'type': 'ir.actions.act_window',
-            'res_model': 'picking.validation.wizard',
-            'view_mode': 'form',
-            'target': 'new',
-            'context': {'default_invoice_id': self.id}
-        }
+        # Detener el proceso automático y abrir el wizard para validar pickings
+        for invoice in self:
+            if invoice.origin:
+                sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
+                if sale_order and sale_order.picking_ids:
+                    # Llamar al wizard si hay pickings asociados
+                    return {
+                        'type': 'ir.actions.act_window',
+                        'res_model': 'picking.validation.wizard',
+                        'view_mode': 'form',
+                        'target': 'new',
+                        'context': {'default_invoice_id': invoice.id}
+                    }
+
+        # Si no hay pickings o no es necesario, continuar con la validación normal
+        return super(AccountInvoice, self).action_invoice_open()
 
     @api.multi
     def action_credit_note_create(self):
