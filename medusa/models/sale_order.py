@@ -16,6 +16,13 @@ class AccountInvoice(models.Model):
 
     # Campo Many2one que relaciona la factura con el pedido de venta
     sale_order_id = fields.Many2one('sale.order', string="Pedido de Venta Relacionado", readonly=True)
+    
+    # Campo que relaciona la factura con el picking que la validó
+    validated_picking_id = fields.Many2one(
+        'stock.picking', 
+        string='Validated Picking', 
+        help='The picking that validated this invoice.'
+    )
 
     @api.model
     def create(self, vals):
@@ -59,6 +66,7 @@ class AccountInvoice(models.Model):
                         picking.sudo().action_done()
 
                         # Registrar que los movimientos de inventario se validaron
+                        invoice.validated_picking_id = picking
                         invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados según la factura.") % sale_order.name)
 
         return res
