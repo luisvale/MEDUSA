@@ -1,5 +1,8 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
+import logging
+
+_logger = logging.getLogger(__name__)
 
 class StockPicking(models.Model):
     _inherit = 'stock.picking'
@@ -75,6 +78,8 @@ class AccountInvoice(models.Model):
 class AccountInvoiceRefund(models.Model):
     _inherit = 'account.invoice'
 
+    invoice_id = fields.Many2one('account.invoice', string="Factura original")
+
     @api.multi
     def action_invoice_open(self):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
@@ -87,16 +92,14 @@ class AccountInvoiceRefund(models.Model):
                 if original_invoice and original_invoice.validated_picking_id:
                     picking = original_invoice.validated_picking_id
 
-                    # Depuración: Mostrar el ID del picking encontrado
-                    _logger.info(f"Picking relacionado encontrado: {picking.id}")
+                    _logger.info(f"Picking relacionado encontrado: {picking.id} | Estado del picking: {picking.state}")
 
-                    # Verificar si el picking existe y está en estado 'done'
                     if picking and picking.state == 'done':
                         # Llamar al wizard de devolución del picking
                         return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
 
                         # Procesar la devolución
-                        return_picking = return_wizard.create_returns()
+                        return_picking, _ = return_wizard.create_returns()
 
                         # Validar el picking de devolución
                         return_picking.action_done()
