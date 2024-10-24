@@ -80,13 +80,15 @@ class AccountInvoiceRefund(models.Model):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
             if invoice.type == 'out_refund' and invoice.origin:
+                # Buscar la factura original relacionada
                 original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
                 
-                # Verificamos si el original_invoice tiene el picking relacionado
+                # Verificar si la factura original tiene un picking relacionado
                 if original_invoice and original_invoice.validated_picking_id:
                     picking = original_invoice.validated_picking_id
                     
                     if picking.exists():
+                        # Llamar al método para crear la devolución en el picking encontrado
                         self._create_return_picking(picking, invoice)
                     else:
                         raise UserError(_("El picking relacionado con la factura original no existe o ha sido eliminado."))
@@ -95,8 +97,13 @@ class AccountInvoiceRefund(models.Model):
         return res
 
     def _create_return_picking(self, picking, invoice):
+        # Crear el wizard de devolución
         return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+        # Configurar las líneas de devolución para que sean reembolsadas
         return_wizard.product_return_moves.write({'to_refund': True})
+        # Crear la devolución
         return_picking, _ = return_wizard.create_returns()
+        # Marcar la devolución como completada
         return_picking.action_done()
+        # Registrar un mensaje en el chatter de la factura de la nota de crédito
         invoice.message_post(body=_("El picking de devolución %s ha sido creado y procesado según la nota de crédito.") % return_picking.name)
