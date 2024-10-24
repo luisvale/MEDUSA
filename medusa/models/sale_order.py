@@ -1,6 +1,10 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
+import logging
 
+_logger = logging.getLogger(__name__)
+
+# Clase que extiende stock.picking para agregar el campo validated_invoice_id
 class StockPicking(models.Model):
     _inherit = 'stock.picking'
     
@@ -10,7 +14,7 @@ class StockPicking(models.Model):
         help='The invoice that validated this picking and set it to done.'
     )
 
-
+# Clase que extiende account.invoice para agregar los campos sale_order_id y validated_picking_id
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -24,6 +28,7 @@ class AccountInvoice(models.Model):
         help='The picking that validated this invoice.'
     )
 
+    # Método create que asigna el pedido de venta a la factura
     @api.model
     def create(self, vals):
         # Crear la factura
@@ -37,7 +42,7 @@ class AccountInvoice(models.Model):
         
         return invoice
 
-
+    # Método que valida la factura y procesa los movimientos de inventario
     @api.multi
     def action_invoice_open(self):
         # Llama al método original para validar la factura
@@ -71,7 +76,7 @@ class AccountInvoice(models.Model):
 
         return res
 
-
+# Clase para la devolución en las facturas (notas de crédito)
 class AccountInvoiceRefund(models.Model):
     _inherit = 'account.invoice'
 
