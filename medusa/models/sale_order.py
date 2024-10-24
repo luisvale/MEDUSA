@@ -56,12 +56,26 @@ class AccountInvoiceRefund(models.Model):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
             if invoice.type == 'out_refund' and invoice.origin:
+                # Buscar la factura original basada en el número de factura
                 original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
-                if original_invoice and original_invoice.validated_invoice_id:
-                    for picking in original_invoice.sale_order_id.picking_ids.filtered(lambda p: p.validated_invoice_id == original_invoice):
-                        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
-                        return_wizard.product_return_moves.write({'to_refund': True})
-                        return_picking, _ = return_wizard.create_returns()
-                        return_picking.action_done()
-                        invoice.message_post(body=_("Return picking %s created and processed due to this credit note.") % return_picking.name)
+                if not original_invoice:
+                    raise UserError(_("No se encontró la factura original con número {}.").format(invoice.origin))
+                
+                if original_invoice and original_invoice.sale_order_id:
+                    # Realizar la devolución en los pickings relacionados al pedido de venta
+                    sale_order = original_invoice.sale_order_id
+                    for picking in sale_order.picking_ids:
+                        if picking.state == 'done':  # Consideramos solo los pickings que han sido completados
+                            self._create_return_picking(picking, invoice)
         return res
+
+    def _create_return_picking(self, picking, invoice):
+        # Crear un asistente de devolución para cada picking
+        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+        # Seleccionar todos los productos para devolver
+        return_wizard.product_return_moves.write({'to_refund': True})
+        return_picking, _ = return_wizard.create_returns()
+        # Confirmar el picking de devolución
+        return_picking.action_done()
+        # Registrar un mensaje en el diario de la factura
+        invoice.message_post(body=_("Se ha creado y procesado un picking de devolución {} debido a esta nota de crédito.").format(return_picking.name))
