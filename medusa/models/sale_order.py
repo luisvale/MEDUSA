@@ -32,32 +32,20 @@ class AccountInvoice(models.Model):
     def action_invoice_open(self):
         # Llama al método original para validar la factura
         res = super(AccountInvoice, self).action_invoice_open()
-
         for invoice in self:
             if invoice.sale_order_id:
-                # Obtener los pickings relacionados al pedido de venta
-                sale_order = invoice.sale_order_id
-                for picking in sale_order.picking_ids:
+                for picking in invoice.sale_order_id.picking_ids:
                     if picking.state in ['confirmed', 'assigned']:
-                        # Procesar cada picking relacionado
                         for move_line in picking.move_line_ids:
-                            # Buscar la línea de factura correspondiente al producto del movimiento
                             invoice_line = invoice.invoice_line_ids.filtered(lambda l: l.product_id == move_line.product_id)
                             if invoice_line:
                                 qty_to_process = sum(line.quantity for line in invoice_line)
-                                # Ajustar la cantidad hecha basada en la cantidad facturada
-                                move_line.qty_done = qty_to_process if qty_to_process < move_line.product_uom_qty else move_line.product_uom_qty
-                                # Validar el picking si la cantidad realizada es igual a la cantidad reservada
+                                move_line.qty_done = min(qty_to_process, move_line.product_uom_qty)
                                 if move_line.qty_done == move_line.product_uom_qty:
                                     move_line.move_id._action_done()
-
-                        # Validar el picking después de ajustar las cantidades y asignar la factura que lo validó
                         picking.validated_invoice_id = invoice
                         picking.sudo().action_done()
-
-                        # Registrar que los movimientos de inventario se validaron
-                        invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados según la factura.") % sale_order.name)
-
+                        invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados según la factura.") % invoice.sale_order_id.name)
         return res
 
 class AccountInvoiceRefund(models.Model):
@@ -65,36 +53,15 @@ class AccountInvoiceRefund(models.Model):
 
     @api.multi
     def action_invoice_open(self):
-        # Llama al método original para validar la nota de crédito
         res = super(AccountInvoiceRefund, self).action_invoice_open()
-
         for invoice in self:
             if invoice.type == 'out_refund' and invoice.origin:
-                # Buscar la factura original asociada a la nota de crédito
                 original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
-                if original_invoice and original_invoice.sale_order_id:
-                    # Obtener el pedido de ventas asociado a la factura original
-                    sale_order = original_invoice.sale_order_id
-                    if sale_order:
-                        # Buscar los pickings relacionados al pedido de venta y el producto devuelto
-                        for line in invoice.invoice_line_ids:
-                            product = line.product_id
-                            if product.type != 'service':
-                                # Encontrar los pickings relacionados al pedido de venta
-                                for picking in sale_order.picking_ids.filtered(lambda p: p.state == 'done'):
-                                    for move in picking.move_lines.filtered(lambda m: m.product_id == product):
-                                        # Crear un wizard de devolución para procesar la devolución
-                                        return_wizard = self.env['stock.return.picking'].create({
-                                            'picking_id': picking.id
-                                        })
-                                        return_wizard.product_return_moves.filtered(lambda r: r.product_id == product).update({
-                                            'quantity': line.quantity,
-                                            'to_refund': True
-                                        })
-                                        # Crear y validar la devolución
-                                        return_picking = return_wizard.create_returns()[0]
-                                        return_picking.action_done()
-                                        
-                                        # Registrar la devolución en el chatter de la factura
-                                        invoice.message_post(body=_("Se ha creado una devolución para el producto %s del pedido de venta %s.") % (product.display_name, sale_order.name))
+                if original_invoice and original_invoice.validated_invoice_id:
+                    for picking in original_invoice.sale_order_id.picking_ids.filtered(lambda p: p.validated_invoice_id == original_invoice):
+                        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+                        return_wizard.product_return_moves.write({'to_refund': True})
+                        return_picking, _ = return_wizard.create_returns()
+                        return_picking.action_done()
+                        invoice.message_post(body=_("Return picking %s created and processed due to this credit note.") % return_picking.name)
         return res
