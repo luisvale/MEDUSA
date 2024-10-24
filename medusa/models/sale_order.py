@@ -80,121 +80,119 @@ import logging
 
 _logger = logging.getLogger(__name__)
 
-###class StockWarningWizard(models.TransientModel):
-###    _name = 'stock.warning.wizard'
-###    _description = 'Stock Insufficient Warning Wizard'
-###
-###    message = fields.Text(string="Advertencia", readonly=True)
-###
-###    @api.multi
-###    def action_confirm(self):
-###        sale_order_id = self.env.context.get('sale_order_id')
-###        if sale_order_id:
-###            sale_order = self.env['sale.order'].browse(sale_order_id)
-###            _logger.warning(f"Pedido {sale_order.name} confirmado a pesar de advertencia de stock insuficiente.")
-###            sale_order.sudo().action_confirm()
-###        return {'type': 'ir.actions.act_window_close'}
-###
-###class SaleOrder(models.Model):
-###    _inherit = "sale.order"
-###
-###    @api.multi
-###    def action_confirm(self):
-###        stock_warnings = []
-###
-###        for order in self:
-###            for picking in order.picking_ids:
-###                for move in picking.move_ids_without_package:
-###                    if move.reserved_availability < move.product_uom_qty:
-###                        stock_warnings.append({
-###                            'product': move.product_id.name,
-###                            'needed_qty': move.product_uom_qty,
-###                            'available_qty': move.reserved_availability,
-###                        })
-###
-###        if stock_warnings:
-###            message = "\n".join([
-###                _("Producto: %s | Cantidad requerida: %s | Cantidad disponible: %s") % (
-###                    warning['product'], warning['needed_qty'], warning['available_qty']
-###                )
-###                for warning in stock_warnings
-###            ])
-###            full_message = _(
-###                "Algunos productos no tienen suficiente disponibilidad para completar el pedido:\n\n%s\n\n"
-###                "Si confirma el pedido en este estado, no se podrá hacer la salida de inventario y la facturación no será posible. "
-###                "¿Desea continuar con la confirmación?"
-###            ) % message
-###            # Llama al wizard para advertir al usuario y permitir que continúe si lo desea
-###            return {
-###                'name': _('Stock insuficiente'),
-###                'type': 'ir.actions.act_window',
-###                'res_model': 'stock.warning.wizard',
-###                'view_mode': 'form',
-###                'view_type': 'form',
-###                'target': 'new',
-###                'context': {
-###                    'default_message': full_message,
-###                   'sale_order_id': self.id
-###                }
-###            }
-###
-###        # Si no hay advertencias de stock, proceder con la confirmación del pedido###
-###        super(SaleOrder, self).action_confirm()
-###
-###        # Actualizar qty_done en los movimientos de inventario después de confirmar el pedido
-###        for order in self:
-###            for picking in order.picking_ids:
-###                if picking.state in ['confirmed', 'assigned', 'waiting']:
-###                    picking.sudo().action_confirm()
-###                    picking.sudo().action_assign()
-###
-###                    # Asignar automáticamente qty_done con la cantidad reservada
-###                    for move in picking.move_lines:
-###                        if move.reserved_availability > 0:
-###                            move.qty_done = move.reserved_availability
-###
-###        return True
+class StockWarningWizard(models.TransientModel):
+    _name = 'stock.warning.wizard'
+    _description = 'Stock Insufficient Warning Wizard'
+
+    message = fields.Text(string="Advertencia", readonly=True)
+
+    @api.multi
+    def action_confirm(self):
+        sale_order_id = self.env.context.get('sale_order_id')
+        if sale_order_id:
+            sale_order = self.env['sale.order'].browse(sale_order_id)
+            _logger.warning(f"Pedido {sale_order.name} confirmado a pesar de advertencia de stock insuficiente.")
+            sale_order.sudo().action_confirm()
+        return {'type': 'ir.actions.act_window_close'}
+
+class SaleOrder(models.Model):
+    _inherit = "sale.order"
+
+    @api.multi
+    def action_confirm(self):
+        stock_warnings = []
+
+        for order in self:
+            for picking in order.picking_ids:
+                for move in picking.move_ids_without_package:
+                    if move.reserved_availability < move.product_uom_qty:
+                        stock_warnings.append({
+                            'product': move.product_id.name,
+                            'needed_qty': move.product_uom_qty,
+                            'available_qty': move.reserved_availability,
+                        })
+
+        if stock_warnings:
+            message = "\n".join([
+                _("Producto: %s | Cantidad requerida: %s | Cantidad disponible: %s") % (
+                    warning['product'], warning['needed_qty'], warning['available_qty']
+                )
+                for warning in stock_warnings
+            ])
+            full_message = _(
+                "Algunos productos no tienen suficiente disponibilidad para completar el pedido:\n\n%s\n\n"
+                "Si confirma el pedido en este estado, no se podrá hacer la salida de inventario y la facturación no será posible. "
+                "¿Desea continuar con la confirmación?"
+            ) % message
+            # Llama al wizard para advertir al usuario y permitir que continúe si lo desea
+            return {
+                'name': _('Stock insuficiente'),
+                'type': 'ir.actions.act_window',
+                'res_model': 'stock.warning.wizard',
+                'view_mode': 'form',
+                'view_type': 'form',
+                'target': 'new',
+                'context': {
+                    'default_message': full_message,
+                    'sale_order_id': self.id
+                }
+            }
+
+        # Si no hay advertencias de stock, proceder con la confirmación del pedido
+        super(SaleOrder, self).action_confirm()
+
+        # Actualizar qty_done en los movimientos de inventario después de confirmar el pedido
+        for order in self:
+            for picking in order.picking_ids:
+                if picking.state in ['confirmed', 'assigned', 'waiting']:
+                    picking.sudo().action_confirm()
+                    picking.sudo().action_assign()
+
+                    # Asignar automáticamente qty_done con la cantidad reservada
+                    for move in picking.move_lines:
+                        if move.reserved_availability > 0:
+                            move.qty_done = move.reserved_availability
+
+        return True
 
 
 
-###class PickingValidationWizard(models.TransientModel):
-###    _name = 'picking.validation.wizard'
-###    _description = 'Wizard para validar los pickings asociados a una factura'
-###
-###    invoice_id = fields.Many2one('account.invoice', string="Factura", required=True)
-###    picking_ids = fields.Many2many('stock.picking', string="Pickings a validar", readonly=True)
-###
-###    @api.model
-###    def default_get(self, fields):
-###        res = super(PickingValidationWizard, self).default_get(fields)
-###        invoice_id = self.env.context.get('default_invoice_id')
-###        invoice = self.env['account.invoice'].browse(invoice_id)
-###        
-###        if invoice.origin:
-###            sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
-###            if sale_order:
-###                res['picking_ids'] = [(6, 0, sale_order.picking_ids.ids)]
-###                res['invoice_id'] = invoice.id
-###        return res
-###
-###    def action_validate_pickings(self):
-###        for picking in self.picking_ids:
-###            if picking.state not in ['done', 'cancel']:
-###                picking.sudo().action_confirm()
-###                picking.sudo().action_assign()
-###
-###                # Asignar automáticamente la cantidad hecha (qty_done)
-###                for move_line in picking.move_line_ids:
-###                    move_line.qty_done = move_line.product_uom_qty  # Asignar la cantidad hecha
-###
-###                # Forzar la validación del picking
-###                picking.sudo().button_validate()
-###
-###        # Registrar en la factura que se validaron los movimientos
-###        self.invoice_id.message_post(body=_("Los movimientos de inventario relacionados al pedido han sido validados desde el wizard."))
-###        return {'type': 'ir.actions.act_window_close'}
+class PickingValidationWizard(models.TransientModel):
+    _name = 'picking.validation.wizard'
+    _description = 'Wizard para validar los pickings asociados a una factura'
 
+    invoice_id = fields.Many2one('account.invoice', string="Factura", required=True)
+    picking_ids = fields.Many2many('stock.picking', string="Pickings a validar", readonly=True)
 
+    @api.model
+    def default_get(self, fields):
+        res = super(PickingValidationWizard, self).default_get(fields)
+        invoice_id = self.env.context.get('default_invoice_id')
+        invoice = self.env['account.invoice'].browse(invoice_id)
+        
+        if invoice.origin:
+            sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
+            if sale_order:
+                res['picking_ids'] = [(6, 0, sale_order.picking_ids.ids)]
+                res['invoice_id'] = invoice.id
+        return res
+
+    def action_validate_pickings(self):
+        for picking in self.picking_ids:
+            if picking.state not in ['done', 'cancel']:
+                picking.sudo().action_confirm()
+                picking.sudo().action_assign()
+
+                # Asignar automáticamente la cantidad hecha (qty_done)
+                for move_line in picking.move_line_ids:
+                    move_line.qty_done = move_line.product_uom_qty  # Asignar la cantidad hecha
+
+                # Forzar la validación del picking
+                picking.sudo().button_validate()
+
+        # Registrar en la factura que se validaron los movimientos
+        self.invoice_id.message_post(body=_("Los movimientos de inventario relacionados al pedido han sido validados desde el wizard."))
+        return {'type': 'ir.actions.act_window_close'}
 
 
 
@@ -204,18 +202,13 @@ class AccountInvoice(models.Model):
     # Campo Many2one que relaciona la factura con el pedido de venta
     sale_order_id = fields.Many2one('sale.order', string="Pedido de Venta Relacionado", readonly=True)
 
-    @api.model
-    def create(self, vals):
-        # Crear la factura
-        invoice = super(AccountInvoice, self).create(vals)
-        
-        # Relacionar el pedido de venta basado en el campo 'origin'
-        if invoice.origin:
-            sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
+    @api.onchange('origin')
+    def _onchange_origin(self):
+        # Automáticamente rellenar el campo sale_order_id si hay un pedido relacionado
+        if self.origin:
+            sale_order = self.env['sale.order'].search([('name', '=', self.origin)], limit=1)
             if sale_order:
-                invoice.sale_order_id = sale_order
-        
-        return invoice
+                self.sale_order_id = sale_order
 
     @api.multi
     def action_invoice_open(self):
@@ -242,7 +235,7 @@ class AccountInvoice(models.Model):
                 invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
 
         return res
-        
+
     @api.multi
     def action_credit_note_create(self):
         for invoice in self:
