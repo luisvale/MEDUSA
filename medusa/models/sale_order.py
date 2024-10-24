@@ -62,18 +62,6 @@ class AccountInvoice(models.Model):
 
         return res
 
-    @api.multi
-    def action_invoice_open(self):
-        res = super(AccountInvoice, self).action_invoice_open()
-        for invoice in self:
-            if invoice.sale_order_id:
-                for picking in invoice.sale_order_id.picking_ids:
-                    if picking.state in ['confirmed', 'assigned']:
-                        picking.validated_invoice_id = invoice.id
-                        picking.action_done()
-                        invoice.message_post(body=_("Picking %s validated and set to done by this invoice.") % picking.name)
-        return res
-
 class AccountInvoiceRefund(models.Model):
     _inherit = 'account.invoice'
 
