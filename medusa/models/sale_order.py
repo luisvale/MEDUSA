@@ -80,7 +80,7 @@ class AccountInvoiceRefund(models.Model):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
             if invoice.type == 'out_refund' and invoice.invoice_id:
-                # Obtener la factura original
+                # Obtener la factura original desde invoice_id
                 original_invoice = invoice.invoice_id
 
                 # Verificar si la factura original tiene un picking relacionado
