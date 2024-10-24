@@ -53,14 +53,12 @@ class AccountInvoiceRefund(models.Model):
 
     @api.multi
     def action_invoice_open(self):
+        # Llama al método original para validar la factura
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
             if invoice.type == 'out_refund' and invoice.origin:
                 # Buscar la factura original basada en el número de factura
                 original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
-                if not original_invoice:
-                    raise UserError(_("No se encontró la factura original con número {}.").format(invoice.origin))
-                
                 if original_invoice and original_invoice.sale_order_id:
                     # Realizar la devolución en los pickings relacionados al pedido de venta
                     sale_order = original_invoice.sale_order_id
