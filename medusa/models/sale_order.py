@@ -78,8 +78,6 @@ class AccountInvoice(models.Model):
 class AccountInvoiceRefund(models.Model):
     _inherit = 'account.invoice'
 
-    invoice_id = fields.Many2one('account.invoice', string="Factura original")
-
     @api.multi
     def action_invoice_open(self):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
