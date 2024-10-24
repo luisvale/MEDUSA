@@ -19,9 +19,10 @@ class AccountInvoice(models.Model):
         
         return invoice
 
+
     @api.multi
     def action_invoice_open(self):
-        # Llamar al método original para validar la factura
+        # Llama al método original para validar la factura
         res = super(AccountInvoice, self).action_invoice_open()
 
         for invoice in self:
@@ -29,32 +30,23 @@ class AccountInvoice(models.Model):
                 # Obtener los pickings relacionados al pedido de venta
                 sale_order = invoice.sale_order_id
                 for picking in sale_order.picking_ids:
-                    if picking.state not in ['done', 'cancel']:
-                        picking.sudo().action_confirm()
-                        picking.sudo().action_assign()
-
+                    if picking.state in ['confirmed', 'assigned']:
+                        # Procesar cada picking relacionado
                         for move_line in picking.move_line_ids:
-                            # Verificar si las unidades facturadas son menores que las reservadas
-                            qty_facturada = sum(invoice.invoice_line_ids.filtered(lambda l: l.product_id == move_line.product_id).mapped('quantity'))
-                            if qty_facturada < move_line.product_uom_qty:
-                                # Hacer un movimiento parcial si la cantidad facturada es menor
-                                move_line.qty_done = qty_facturada
+                            # Buscar la línea de factura correspondiente al producto del movimiento
+                            invoice_line = invoice.invoice_line_ids.filtered(lambda l: l.product_id == move_line.product_id)
+                            if invoice_line:
+                                qty_to_process = sum(line.quantity for line in invoice_line)
+                                # Ajustar la cantidad hecha basada en la cantidad facturada
+                                move_line.qty_done = qty_to_process if qty_to_process < move_line.product_uom_qty else move_line.product_uom_qty
+                                # Validar el picking si la cantidad realizada es igual a la cantidad reservada
+                                if move_line.qty_done == move_line.product_uom_qty:
+                                    move_line.move_id._action_done()
                                 
-                                # Crear un movimiento parcial con la cantidad restante
-                                remaining_qty = move_line.product_uom_qty - qty_facturada
-                                move_line.copy({
-                                    'product_uom_qty': remaining_qty,
-                                    'qty_done': 0,
-                                    'picking_id': picking.id,
-                                })
-                            else:
-                                # Asignar automáticamente la cantidad hecha (qty_done) igual a la cantidad reservada
-                                move_line.qty_done = move_line.product_uom_qty
+                        # Validar el picking después de ajustar las cantidades
+                        picking.sudo().action_done()
 
-                        # Validar el picking forzando la validación
-                        picking.sudo().button_validate()
-
-                # Registrar en la factura que los movimientos de inventario han sido validados
-                invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
+                        # Registrar que los movimientos de inventario se validaron
+                        invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados según la factura.") % sale_order.name)
 
         return res
