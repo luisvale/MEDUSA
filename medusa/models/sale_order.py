@@ -5,8 +5,8 @@ class StockPicking(models.Model):
     
     validated_invoice_id = fields.Many2one(
         'account.invoice', 
-        string='Validado por la Factura', 
-        help='Es la factura que valido este picking.'
+        string='Validated by Invoice', 
+        help='The invoice that validated this picking and set it to done.'
     )
 
 class AccountInvoice(models.Model):
@@ -79,24 +79,25 @@ class AccountInvoiceRefund(models.Model):
                         for line in invoice.invoice_line_ids:
                             product = line.product_id
                             if product.type != 'service':
-                                # Crear movimiento de devolución por los productos devueltos
-                                related_picking = sale_order.picking_ids.filtered(lambda p: p.state == 'done')
-                                if related_picking:
-                                    return_wizard = self.env['stock.return.picking'].create({'picking_id': related_picking.id})
-                                    return_wizard.product_return_moves.filtered(lambda r: r.product_id == product).update({
-                                        'quantity': line.quantity,
-                                        'to_refund': True
-                                    })
-                                    return_wizard.create_returns()
-                                    # Registrar la acción en el chatter
-                                    invoice.message_post(body=_("Se ha creado una devolución para el producto %s asociado a la nota de crédito.") % product.display_name)
+                                # Encontrar el movimiento de inventario relacionado con el producto
+                                picking = sale_order.picking_ids.filtered(lambda p: p.state == 'done')
+                                if picking:
+                                    for move in picking.move_lines.filtered(lambda m: m.product_id == product):
+                                        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+                                        return_wizard.product_return_moves.filtered(lambda r: r.product_id == product).update({
+                                            'quantity': line.quantity,
+                                            'to_refund': True
+                                        })
+                                        # Ejecutar la devolución directamente sobre el movimiento de inventario original
+                                        return_wizard.create_returns()
+                                        invoice.message_post(body=_("Se ha creado una devolución para el producto %s del pedido de venta %s.") % (product.display_name, sale_order.name))
         return res
 
     def _create_return_picking(self, picking, invoice):
-        # Wizard de devolución para crear un nuevo picking de retorno
+        # Crear la devolución sobre el picking original
         return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
         return_wizard.product_return_moves.write({'to_refund': True})
         return_picking, _ = return_wizard.create_returns()
         return_picking.action_done()
-        # Registrar la acción en el chatter de la factura
+        # Registrar la devolución en la factura
         invoice.message_post(body=_("Return picking %s created and processed due to this credit note.") % return_picking.name)
