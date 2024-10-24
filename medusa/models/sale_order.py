@@ -79,14 +79,14 @@ class AccountInvoiceRefund(models.Model):
     def action_invoice_open(self):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
-            if invoice.type == 'out_refund' and invoice.origin:
-                # Buscar la factura original relacionada
-                original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
+            if invoice.type == 'out_refund' and invoice.invoice_id:
+                # Obtener la factura original usando el campo invoice_id
+                original_invoice = invoice.invoice_id
                 
                 # Verificar si la factura original tiene un picking relacionado
                 if original_invoice and original_invoice.validated_picking_id:
                     picking = original_invoice.validated_picking_id
-                    
+
                     if picking.exists():
                         # Llamar al método para crear la devolución en el picking encontrado
                         self._create_return_picking(picking, invoice)
