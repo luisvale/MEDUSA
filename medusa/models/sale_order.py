@@ -1,4 +1,4 @@
-from odoo import models, fields, api, _  # Asegúrate de agregar el _ para traducción
+from odoo import models, fields, api, _
 
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
@@ -33,9 +33,23 @@ class AccountInvoice(models.Model):
                         picking.sudo().action_confirm()
                         picking.sudo().action_assign()
 
-                        # Asignar automáticamente la cantidad hecha (qty_done)
                         for move_line in picking.move_line_ids:
-                            move_line.qty_done = move_line.product_uom_qty  # Asignar la cantidad hecha igual a la reservada
+                            # Verificar si las unidades facturadas son menores que las reservadas
+                            qty_facturada = sum(invoice.invoice_line_ids.filtered(lambda l: l.product_id == move_line.product_id).mapped('quantity'))
+                            if qty_facturada < move_line.product_uom_qty:
+                                # Hacer un movimiento parcial si la cantidad facturada es menor
+                                move_line.qty_done = qty_facturada
+                                
+                                # Crear un movimiento parcial con la cantidad restante
+                                remaining_qty = move_line.product_uom_qty - qty_facturada
+                                move_line.copy({
+                                    'product_uom_qty': remaining_qty,
+                                    'qty_done': 0,
+                                    'picking_id': picking.id,
+                                })
+                            else:
+                                # Asignar automáticamente la cantidad hecha (qty_done) igual a la cantidad reservada
+                                move_line.qty_done = move_line.product_uom_qty
 
                         # Validar el picking forzando la validación
                         picking.sudo().button_validate()
