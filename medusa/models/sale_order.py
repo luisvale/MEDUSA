@@ -1,5 +1,14 @@
 from odoo import models, fields, api, _
 
+class StockPicking(models.Model):
+    _inherit = 'stock.picking'
+    
+    validated_invoice_id = fields.Many2one(
+        'account.invoice', 
+        string='Validated by Invoice', 
+        help='The invoice that validated this picking and set it to done.'
+    )
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -50,3 +59,33 @@ class AccountInvoice(models.Model):
                         invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados según la factura.") % sale_order.name)
 
         return res
+
+    @api.multi
+    def action_invoice_open(self):
+        res = super(AccountInvoice, self).action_invoice_open()
+        for invoice in self:
+            if invoice.sale_order_id:
+                for picking in invoice.sale_order_id.picking_ids:
+                    if picking.state in ['confirmed', 'assigned']:
+                        picking.validated_invoice_id = invoice.id
+                        picking.action_done()
+                        invoice.message_post(body=_("Picking %s validated and set to done by this invoice.") % picking.name)
+        return res
+
+    @api.multi
+    def action_invoice_open(self):
+        res = super(AccountInvoiceRefund, self).action_invoice_open()
+        for invoice in self:
+            if invoice.type == 'out_refund' and invoice.origin:
+                original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
+                if original_invoice and original_invoice.validated_invoice_id:
+                    for picking in original_invoice.sale_order_id.picking_ids.filtered(lambda p: p.validated_invoice_id == original_invoice.id):
+                        self._create_return_picking(picking, invoice)
+        return res
+
+    def _create_return_picking(self, picking, invoice):
+        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+        return_wizard.product_return_moves.write({'to_refund': True})
+        return_picking, _ = return_wizard.create_returns()
+        return_picking.action_done()
+        invoice.message_post(body=_("Return picking %s created and processed due to this credit note.") % return_picking.name)
