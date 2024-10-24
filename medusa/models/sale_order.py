@@ -76,17 +76,37 @@ class AccountInvoiceRefund(models.Model):
 
     @api.multi
     def action_invoice_open(self):
-        res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
             if invoice.type == 'out_refund' and invoice.origin:
+                # Buscar la factura original relacionada con la nota de crédito
                 original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
-                if original_invoice and original_invoice.validated_picking_id:
-                    self._create_return_picking(original_invoice.validated_picking_id, invoice)
-        return res
 
-    def _create_return_picking(self, picking, invoice):
+                if original_invoice:
+                    # Buscar el picking relacionado directamente a la factura original
+                    picking = original_invoice.mapped('validated_picking_id')
+
+                    if picking and picking.state == 'done':
+                        # Si se encuentra un picking relacionado, abrir el wizard de devolución
+                        return self._open_return_picking_wizard(picking)
+
+                    else:
+                        raise UserError(_("No se encontró un picking completado relacionado con la factura original."))
+        # Continuar con la validación normal de la nota de crédito después del wizard
+        return super(AccountInvoiceRefund, self).action_invoice_open()
+
+    def _open_return_picking_wizard(self, picking):
+        """Abrir el wizard de devolución para el picking asociado"""
         return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
-        return_wizard.product_return_moves.write({'to_refund': True})
-        return_picking, _ = return_wizard.create_returns()
-        return_picking.action_done()
-        invoice.message_post(body=_("Return picking %s created and processed due to this credit note.") % return_picking.name)
+        return_wizard._onchange_picking_id()  # Este método carga las líneas de productos automáticamente
+
+        # Retornar la acción del wizard para mostrarlo al usuario
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Devolución de Picking',
+            'res_model': 'stock.return.picking',
+            'view_mode': 'form',
+            'view_id': self.env.ref('stock.view_stock_return_picking_form').id,
+            'target': 'new',
+            'res_id': return_wizard.id,
+            'context': self.env.context,
+        }
