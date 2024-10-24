@@ -29,6 +29,7 @@ class AccountInvoice(models.Model):
         return invoice
 
 
+
     @api.multi
     def action_invoice_open(self):
         # Llama al método original para validar la factura
@@ -51,8 +52,9 @@ class AccountInvoice(models.Model):
                                 # Validar el picking si la cantidad realizada es igual a la cantidad reservada
                                 if move_line.qty_done == move_line.product_uom_qty:
                                     move_line.move_id._action_done()
-                                
-                        # Validar el picking después de ajustar las cantidades
+
+                        # Validar el picking después de ajustar las cantidades y asignar la factura que lo validó
+                        picking.validated_invoice_id = invoice
                         picking.sudo().action_done()
 
                         # Registrar que los movimientos de inventario se validaron
