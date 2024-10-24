@@ -197,6 +197,7 @@ _logger = logging.getLogger(__name__)
 
 
 
+
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
 
@@ -241,6 +242,7 @@ class AccountInvoice(models.Model):
                 invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
 
         return res
+        
     @api.multi
     def action_credit_note_create(self):
         for invoice in self:
