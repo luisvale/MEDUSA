@@ -202,13 +202,18 @@ class AccountInvoice(models.Model):
     # Campo Many2one que relaciona la factura con el pedido de venta
     sale_order_id = fields.Many2one('sale.order', string="Pedido de Venta Relacionado", readonly=True)
 
-    @api.onchange('origin')
-    def _onchange_origin(self):
-        # Automáticamente rellenar el campo sale_order_id si hay un pedido relacionado
-        if self.origin:
-            sale_order = self.env['sale.order'].search([('name', '=', self.origin)], limit=1)
+    @api.model
+    def create(self, vals):
+        # Crear la factura
+        invoice = super(AccountInvoice, self).create(vals)
+        
+        # Relacionar el pedido de venta basado en el campo 'origin'
+        if invoice.origin:
+            sale_order = self.env['sale.order'].search([('name', '=', invoice.origin)], limit=1)
             if sale_order:
-                self.sale_order_id = sale_order
+                invoice.sale_order_id = sale_order
+        
+        return invoice
 
     @api.multi
     def action_invoice_open(self):
@@ -235,7 +240,7 @@ class AccountInvoice(models.Model):
                 invoice.message_post(body=_("Los movimientos de inventario relacionados al pedido %s han sido confirmados y procesados.") % sale_order.name)
 
         return res
-
+        
     @api.multi
     def action_credit_note_create(self):
         for invoice in self:
