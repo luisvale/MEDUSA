@@ -89,11 +89,19 @@ class AccountInvoiceRefund(models.Model):
 
                     # Verificamos si el picking existe y está en estado 'done'
                     if picking and picking.state == 'done':
-                        # Llamar al botón de devolución del picking
-                        return_action = picking.with_context({'active_id': picking.id, 'active_ids': [picking.id]}).sudo().action_return()
+                        # Llamar al wizard de devolución del picking
+                        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
 
-                        # Puedes agregar un mensaje o log aquí si es necesario
-                        invoice.message_post(body=_("Se ha ejecutado la devolución del picking %s. Por favor, completa el proceso de devolución manualmente.") % picking.name)
+                        # Procesar la devolución
+                        return_picking = return_wizard.create_returns()
+
+                        # Validar el picking de devolución
+                        return_picking.action_done()
+
+                        # Agregar un mensaje a la nota de crédito
+                        invoice.message_post(body=_("Se ha creado y procesado la devolución de picking %s debido a esta nota de crédito.") % return_picking.name)
                     else:
                         raise UserError(_("No se encontró un picking en estado 'done' relacionado con la factura original."))
+                else:
+                    raise UserError(_("La factura original no tiene un picking asociado."))
         return res
