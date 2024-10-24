@@ -78,8 +78,6 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
 
-_logger = logging.getLogger(__name__)
-
 
 class AccountInvoice(models.Model):
     _inherit = "account.invoice"
