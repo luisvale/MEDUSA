@@ -79,9 +79,8 @@ class AccountInvoiceRefund(models.Model):
     def action_invoice_open(self):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
-            if invoice.type == 'out_refund' and invoice.origin:
-                # Buscar la factura original relacionada con la nota de crédito
-                original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
+            if invoice.type == 'out_refund' and invoice.invoice_id:  # Usar el campo invoice_id para encontrar la factura original
+                original_invoice = invoice.invoice_id
 
                 if original_invoice and original_invoice.validated_picking_id:
                     # Verificar que el picking relacionado todavía exista
