@@ -8,10 +8,10 @@
         Al confirmar la factura, se validan los movimientos de inventario del pedido de venta relacionado.
     """,
     'author': 'MEDUSA',
-    'depends': ['account', 'sale'],  # Dependencias del módulo
+    'depends': ['account', 'sale', 'stock'],  # Dependencias del módulo
     'data': [
     ],
     'installable': True,
     'auto_install': False,
-    'application': False,
+    'application': True,
 }
