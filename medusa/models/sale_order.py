@@ -79,27 +79,24 @@ class AccountInvoiceRefund(models.Model):
     def action_invoice_open(self):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
-            if invoice.type == 'out_refund' and invoice.invoice_id:  # Usar el campo invoice_id para encontrar la factura original
-                original_invoice = invoice.invoice_id
-
+            if invoice.type == 'out_refund' and invoice.origin:
+                original_invoice = self.env['account.invoice'].search([('number', '=', invoice.origin)], limit=1)
+                
+                # Verificamos si el original_invoice tiene el picking relacionado
                 if original_invoice and original_invoice.validated_picking_id:
-                    # Verificar que el picking relacionado todavía exista
-                    if not original_invoice.validated_picking_id.exists():
-                        raise UserError(_("El picking relacionado con la factura original ya no existe."))
-
-                    self._create_return_picking(original_invoice.validated_picking_id, invoice)
+                    picking = original_invoice.validated_picking_id
+                    
+                    if picking.exists():
+                        self._create_return_picking(picking, invoice)
+                    else:
+                        raise UserError(_("El picking relacionado con la factura original no existe o ha sido eliminado."))
                 else:
                     raise UserError(_("No se encontró un picking relacionado con la factura original."))
         return res
 
     def _create_return_picking(self, picking, invoice):
-        # Iniciar el wizard de devolución para el picking relacionado
         return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
-        return_wizard._onchange_picking_id()
-
-        # Procesar la devolución
+        return_wizard.product_return_moves.write({'to_refund': True})
         return_picking, _ = return_wizard.create_returns()
         return_picking.action_done()
-
-        # Registrar un mensaje en la nota de crédito
-        invoice.message_post(body=_("Se ha creado la devolución de picking %s debido a esta nota de crédito.") % return_picking.name)
+        invoice.message_post(body=_("El picking de devolución %s ha sido creado y procesado según la nota de crédito.") % return_picking.name)
