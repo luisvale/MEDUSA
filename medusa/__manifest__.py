@@ -1,13 +1,17 @@
-# -*- coding: utf-8 -*-
-# Part of Odoo. See LICENSE file for full copyright and licensing details.
 {
-    'name' : 'Ajuste_PACASA',
-    'version': '2.3',
-    'author': 's',
-    'category': 'Sales',
-    'maintainer': '',
-    'license': 'LGPL-3',
+    'name': 'Invoice Sale Order Relation',
+    'version': '1.0',
+    'category': 'Accounting',
+    'summary': 'Relación entre facturas y pedidos de venta',
+    'description': """
+        Este módulo añade un campo a las facturas para relacionarlas con los pedidos de venta.
+        Al confirmar la factura, se validan los movimientos de inventario del pedido de venta relacionado.
+    """,
+    'author': 'MEDUSA',
+    'depends': ['account', 'sale'],  # Dependencias del módulo
+    'data': [
+    ],
     'installable': True,
-    'application': True,
-    'auto_install': True,
+    'auto_install': False,
+    'application': False,
 }
