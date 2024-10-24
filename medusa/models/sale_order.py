@@ -76,28 +76,25 @@ class AccountInvoiceRefund(models.Model):
                     # Obtener el pedido de ventas asociado a la factura original
                     sale_order = original_invoice.sale_order_id
                     if sale_order:
+                        # Buscar los pickings relacionados al pedido de venta y el producto devuelto
                         for line in invoice.invoice_line_ids:
                             product = line.product_id
                             if product.type != 'service':
-                                # Encontrar el movimiento de inventario relacionado con el producto
-                                picking = sale_order.picking_ids.filtered(lambda p: p.state == 'done')
-                                if picking:
+                                # Encontrar los pickings relacionados al pedido de venta
+                                for picking in sale_order.picking_ids.filtered(lambda p: p.state == 'done'):
                                     for move in picking.move_lines.filtered(lambda m: m.product_id == product):
-                                        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
+                                        # Crear un wizard de devolución para procesar la devolución
+                                        return_wizard = self.env['stock.return.picking'].create({
+                                            'picking_id': picking.id
+                                        })
                                         return_wizard.product_return_moves.filtered(lambda r: r.product_id == product).update({
                                             'quantity': line.quantity,
                                             'to_refund': True
                                         })
-                                        # Ejecutar la devolución directamente sobre el movimiento de inventario original
-                                        return_wizard.create_returns()
+                                        # Crear y validar la devolución
+                                        return_picking = return_wizard.create_returns()[0]
+                                        return_picking.action_done()
+                                        
+                                        # Registrar la devolución en el chatter de la factura
                                         invoice.message_post(body=_("Se ha creado una devolución para el producto %s del pedido de venta %s.") % (product.display_name, sale_order.name))
         return res
-
-    def _create_return_picking(self, picking, invoice):
-        # Crear la devolución sobre el picking original
-        return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
-        return_wizard.product_return_moves.write({'to_refund': True})
-        return_picking, _ = return_wizard.create_returns()
-        return_picking.action_done()
-        # Registrar la devolución en la factura
-        invoice.message_post(body=_("Return picking %s created and processed due to this credit note.") % return_picking.name)
