@@ -80,14 +80,17 @@ class AccountInvoiceRefund(models.Model):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
         for invoice in self:
             if invoice.type == 'out_refund' and invoice.invoice_id:
-                # Obtener la factura original usando el campo invoice_id
+                # Obtener la factura original
                 original_invoice = invoice.invoice_id
 
                 # Verificar si la factura original tiene un picking relacionado
                 if original_invoice and original_invoice.validated_picking_id:
                     picking = original_invoice.validated_picking_id
 
-                    # Verificamos si el picking existe y está en estado 'done'
+                    # Depuración: Mostrar el ID del picking encontrado
+                    _logger.info(f"Picking relacionado encontrado: {picking.id}")
+
+                    # Verificar si el picking existe y está en estado 'done'
                     if picking and picking.state == 'done':
                         # Llamar al wizard de devolución del picking
                         return_wizard = self.env['stock.return.picking'].create({'picking_id': picking.id})
