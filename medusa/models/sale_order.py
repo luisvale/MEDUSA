@@ -72,6 +72,9 @@ class AccountInvoice(models.Model):
                         invoice.message_post(body=_("Picking %s validated and set to done by this invoice.") % picking.name)
         return res
 
+class AccountInvoiceRefund(models.Model):
+    _inherit = 'account.invoice'
+
     @api.multi
     def action_invoice_open(self):
         res = super(AccountInvoiceRefund, self).action_invoice_open()
